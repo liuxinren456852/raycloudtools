@@ -21,16 +21,20 @@ public:
 
   /// write a set of rays to the file
   bool writeChunk(const class Cloud &chunk);
-  
+
   /// write a set of rays to the file, direct arguments
-  bool writeChunk(std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends, 
-     std::vector<double> &times, std::vector<RGBA> &colours){ return writePlyChunk(ofs_, buffer_, starts, ends, times, colours); }
+  bool writeChunk(std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends, std::vector<double> &times,
+                  std::vector<RGBA> &colours)
+  {
+    return writeRayCloudChunk(ofs_, buffer_, starts, ends, times, colours, has_warned_);
+  }
 
   /// finish writing, and adjust the vertex count at the start.
   void end();
 
   /// return the stored file name
-  const std::string &fileName(){ return file_name_; }
+  const std::string &fileName() { return file_name_; }
+
 private:
   /// store the output file stream
   std::ofstream ofs_;
@@ -38,6 +42,8 @@ private:
   std::string file_name_;
   /// ray buffer to avoid repeated reallocations
   RayPlyBuffer buffer_;
+  /// whether a warning has been issued or not. This prevents multiple warnings.
+  bool has_warned_;
 };
 
 }  // namespace ray

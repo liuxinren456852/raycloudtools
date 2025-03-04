@@ -5,7 +5,6 @@
 // Author: Thomas Lowe
 #include "raycloud.h"
 
-#include "raydebugdraw.h"
 #include "raylaz.h"
 #include "rayply.h"
 #include "rayprogress.h"
@@ -19,7 +18,6 @@
 
 namespace ray
 {
-
 void Cloud::clear()
 {
   starts.clear();
@@ -34,28 +32,38 @@ void Cloud::save(const std::string &file_name) const
   writePlyRayCloud(name, starts, ends, times, colours);
 }
 
-bool Cloud::load(const std::string &file_name, bool check_extension)
+bool Cloud::load(const std::string &file_name, bool check_extension, int min_num_rays)
 {
   // look first for the raycloud PLY
   if (file_name.substr(file_name.size() - 4) == ".ply" || !check_extension)
-    return loadPLY(file_name);
-    
-  std::cerr << "Attempting to load ray cloud " << file_name << " which doesn't have expected file extension .ply" << std::endl;
+    return loadPLY(file_name, min_num_rays);
+
+  std::cerr << "Attempting to load ray cloud " << file_name << " which doesn't have expected file extension .ply"
+            << std::endl;
   return false;
 }
 
-bool Cloud::loadPLY(const std::string &file)
+bool Cloud::loadPLY(const std::string &file, int min_num_rays)
 {
   bool res = readPly(file, starts, ends, times, colours, true);
-  #if defined OUTPUT_CLOUD_MOMENTS
-  getMoments();
-  #endif // defined OUTPUT_CLOUD_MOMENTS
+  if ((int)ends.size() < min_num_rays)
+    return false;
+#if defined OUTPUT_CLOUD_MOMENTS // Only used to supply data to unit tests
+  Eigen::Array<double, 22, 1> mom = getMoments();
+  std::cout << "stats: " << std::endl;
+  for (int i = 0; i < mom.rows(); i++) 
+  {
+    std::cout << ", " << mom[i];
+  }
+  std::cout << std::endl;
+#endif  // defined OUTPUT_CLOUD_MOMENTS
   return res;
 }
 
 Eigen::Vector3d Cloud::calcMinBound() const
 {
-  Eigen::Vector3d min_v(std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max());
+  Eigen::Vector3d min_v(std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+                        std::numeric_limits<double>::max());
   for (int i = 0; i < (int)ends.size(); i++)
   {
     if (rayBounded(i))
@@ -66,7 +74,8 @@ Eigen::Vector3d Cloud::calcMinBound() const
 
 Eigen::Vector3d Cloud::calcMaxBound() const
 {
-  Eigen::Vector3d max_v(std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest());
+  Eigen::Vector3d max_v(std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(),
+                        std::numeric_limits<double>::lowest());
   for (int i = 0; i < (int)ends.size(); i++)
   {
     if (rayBounded(i))
@@ -75,7 +84,8 @@ Eigen::Vector3d Cloud::calcMaxBound() const
   return max_v;
 }
 
-bool Cloud::calcBounds(Eigen::Vector3d *min_bounds, Eigen::Vector3d *max_bounds, unsigned flags, Progress *progress) const
+bool Cloud::calcBounds(Eigen::Vector3d *min_bounds, Eigen::Vector3d *max_bounds, unsigned flags,
+                       Progress *progress) const
 {
   if (rayCount() == 0)
   {
@@ -88,9 +98,9 @@ bool Cloud::calcBounds(Eigen::Vector3d *min_bounds, Eigen::Vector3d *max_bounds,
   }
 
   *min_bounds = Eigen::Vector3d(std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
-                         std::numeric_limits<double>::max());
+                                std::numeric_limits<double>::max());
   *max_bounds = Eigen::Vector3d(std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(),
-                         std::numeric_limits<double>::lowest());
+                                std::numeric_limits<double>::lowest());
   bool invalid_bounds = true;
   for (size_t i = 0; i < rayCount(); ++i)
   {
@@ -165,7 +175,8 @@ void Cloud::decimate(double voxel_width, std::set<Eigen::Vector3i, Vector3iLess>
   times.resize(subsample.size());
 }
 
-void Cloud::eigenSolve(const std::vector<int> &ray_ids, const Eigen::MatrixXi &indices, int index, int num_neighbours, Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &solver, Eigen::Vector3d &centroid)
+void Cloud::eigenSolve(const std::vector<int> &ray_ids, const Eigen::MatrixXi &indices, int index, int num_neighbours,
+                       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> &solver, Eigen::Vector3d &centroid) const
 {
   int ray_id = ray_ids[index];
   centroid = ends[ray_id];
@@ -183,8 +194,8 @@ void Cloud::eigenSolve(const std::vector<int> &ray_ids, const Eigen::MatrixXi &i
 }
 
 void Cloud::getSurfels(int search_size, std::vector<Eigen::Vector3d> *centroids, std::vector<Eigen::Vector3d> *normals,
-                       std::vector<Eigen::Vector3d> *dimensions, std::vector<Eigen::Matrix3d> *mats, 
-                       Eigen::MatrixXi *neighbour_indices, bool reject_back_facing_rays)
+                       std::vector<Eigen::Vector3d> *dimensions, std::vector<Eigen::Matrix3d> *mats,
+                       Eigen::MatrixXi *neighbour_indices, double max_distance, bool reject_back_facing_rays) const
 {
   // simplest scheme... find 3 nearest neighbours and do cross product
   if (centroids)
@@ -202,8 +213,7 @@ void Cloud::getSurfels(int search_size, std::vector<Eigen::Vector3d> *centroids,
     if (rayBounded(i))
       ray_ids.push_back(i);
   Eigen::MatrixXd points_p(3, ray_ids.size());
-  for (unsigned int i = 0; i < ray_ids.size(); i++) 
-    points_p.col(i) = ends[ray_ids[i]];
+  for (unsigned int i = 0; i < ray_ids.size(); i++) points_p.col(i) = ends[ray_ids[i]];
   nns = Nabo::NNSearchD::createKDTreeLinearHeap(points_p, 3);
 
   // Run the search
@@ -211,66 +221,80 @@ void Cloud::getSurfels(int search_size, std::vector<Eigen::Vector3d> *centroids,
   Eigen::MatrixXd dists2;
   indices.resize(search_size, ray_ids.size());
   dists2.resize(search_size, ray_ids.size());
-  nns->knn(points_p, indices, dists2, search_size, kNearestNeighbourEpsilon, 0);
+  if (max_distance != 0.0)
+    nns->knn(points_p, indices, dists2, search_size, kNearestNeighbourEpsilon, 0, max_distance);
+  else
+    nns->knn(points_p, indices, dists2, search_size, kNearestNeighbourEpsilon, 0);
   delete nns;
 
   if (neighbour_indices)
-    neighbour_indices->resize(search_size, ends.size());
-  for (int i = 0; i < (int)ray_ids.size(); i++)
   {
-    int ray_id = ray_ids[i];
-    Eigen::Vector3d centroid;
-    int num_neighbours;
-    for (num_neighbours = 0; num_neighbours < search_size && indices(num_neighbours, i) > -1; num_neighbours++);
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen_solver(3);
-
-    eigenSolve(ray_ids, indices, i, num_neighbours, eigen_solver, centroid);
-
-    if (reject_back_facing_rays)
+    neighbour_indices->resize(search_size, ends.size());
+    for (int i = 0; i<neighbour_indices->rows(); i++)
     {
-      Eigen::Vector3d normal = eigen_solver.eigenvectors().col(0);
-      if ((ends[ray_id] - starts[ray_id]).dot(normal) > 0.0)
-        normal = -normal;
-      bool changed = false;
-      for (int j = num_neighbours-1; j >= 0; j--)
+      for (int j = 0; j < neighbour_indices->cols(); j++)
       {
-        int id = ray_ids[indices(j, i)];
-        if ((ends[id] - starts[id]).dot(normal) > 0.0)
-        {
-          indices(j, i) = indices(--num_neighbours, i);
-          changed = true;
-        }
-      }
-      if (changed)
-      {
-        eigenSolve(ray_ids, indices, i, num_neighbours, eigen_solver, centroid);
+        (*neighbour_indices)(i, j) = -1;
       }
     }
-
-    if (neighbour_indices)
+    for (int i = 0; i < (int)ray_ids.size(); i++)
     {
-      int j;
-      for (j = 0; j < num_neighbours; j++) 
+      int ray_id = ray_ids[i];
+      for (int j = 0; j < search_size && indices(j, i) != Nabo::NNSearchD::InvalidIndex; j++) 
+      {
         (*neighbour_indices)(j, ray_id) = ray_ids[indices(j, i)];
-      if (j < search_size)
-        (*neighbour_indices)(j, ray_id) = -1;
+      }
     }
-    if (centroids)
-      (*centroids)[ray_id] = centroid;
-    if (normals)
+  }
+  if (centroids || normals || dimensions || mats)
+  {
+    for (int i = 0; i < (int)ray_ids.size(); i++)
     {
-      Eigen::Vector3d normal = eigen_solver.eigenvectors().col(0);
-      if ((ends[ray_id] - starts[ray_id]).dot(normal) > 0.0)
-        normal = -normal;
-      (*normals)[ray_id] = normal;
+      int ray_id = ray_ids[i];
+      Eigen::Vector3d centroid;
+      int num_neighbours;
+      for (num_neighbours = 0; num_neighbours < search_size && indices(num_neighbours, i) != Nabo::NNSearchD::InvalidIndex; num_neighbours++){}
+
+      Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eigen_solver(3);
+      eigenSolve(ray_ids, indices, i, num_neighbours, eigen_solver, centroid);
+      if (reject_back_facing_rays)
+      {
+        Eigen::Vector3d normal = eigen_solver.eigenvectors().col(0);
+        if ((ends[ray_id] - starts[ray_id]).dot(normal) > 0.0)
+          normal = -normal;
+        bool changed = false;
+        for (int j = num_neighbours - 1; j >= 0; j--)
+        {
+          int id = ray_ids[indices(j, i)];
+          if ((ends[id] - starts[id]).dot(normal) > 0.0)
+          {
+            indices(j, i) = indices(--num_neighbours, i);
+            changed = true;
+          }
+        }
+        if (changed)
+        {
+          eigenSolve(ray_ids, indices, i, num_neighbours, eigen_solver, centroid);
+        }
+      }   
+      if (centroids)
+        (*centroids)[ray_id] = centroid;
+      if (normals)
+      {
+        Eigen::Vector3d normal = eigen_solver.eigenvectors().col(0);
+        if ((ends[ray_id] - starts[ray_id]).dot(normal) > 0.0)
+          normal = -normal;
+        (*normals)[ray_id] = normal;
+      }
+      if (dimensions)
+      {
+        Eigen::Vector3d eigenvals = maxVector(Eigen::Vector3d(1e-10, 1e-10, 1e-10), eigen_solver.eigenvalues());
+        (*dimensions)[ray_id] =
+          Eigen::Vector3d(std::sqrt(eigenvals[0]), std::sqrt(eigenvals[1]), std::sqrt(eigenvals[2]));
+      }
+      if (mats)
+        (*mats)[ray_id] = eigen_solver.eigenvectors();
     }
-    if (dimensions)
-    {
-      Eigen::Vector3d eigenvals = maxVector(Eigen::Vector3d(1e-10, 1e-10, 1e-10), eigen_solver.eigenvalues());
-      (*dimensions)[ray_id] = Eigen::Vector3d(std::sqrt(eigenvals[0]), std::sqrt(eigenvals[1]), std::sqrt(eigenvals[2]));
-    }
-    if (mats)
-      (*mats)[ray_id] = eigen_solver.eigenvectors();
   }
 }
 
@@ -278,7 +302,7 @@ void Cloud::getSurfels(int search_size, std::vector<Eigen::Vector3d> *centroids,
 std::vector<Eigen::Vector3d> Cloud::generateNormals(int search_size)
 {
   std::vector<Eigen::Vector3d> normals;
-  getSurfels(search_size, NULL, &normals, NULL, NULL, NULL);
+  getSurfels(search_size, nullptr, &normals, nullptr, nullptr, nullptr);
   return normals;
 }
 
@@ -290,13 +314,15 @@ bool RAYLIB_EXPORT Cloud::getInfo(const std::string &file_name, Info &info)
   Eigen::Vector3d max_v(max_s, max_s, max_s);
   Cuboid unbounded(min_v, max_v);
   info.ends_bound = info.starts_bound = info.rays_bound = unbounded;
-  info.num_unbounded = info.num_bounded = 0;
+  info.num_rays = info.num_bounded = 0;
   info.min_time = min_s;
   info.max_time = max_s;
   info.centroid.setZero();
-  auto find_bounds = [&](std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends, std::vector<double> &times, std::vector<ray::RGBA> &colours)
-  {
-    for (size_t i = 0; i<ends.size(); i++)
+  info.start_pos.setZero();
+  info.end_pos.setZero();
+  auto find_bounds = [&](std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends,
+                         std::vector<double> &times, std::vector<ray::RGBA> &colours) {
+    for (size_t i = 0; i < ends.size(); i++)
     {
       if (colours[i].alpha > 0)
       {
@@ -305,39 +331,48 @@ bool RAYLIB_EXPORT Cloud::getInfo(const std::string &file_name, Info &info)
         info.num_bounded++;
         info.centroid += ends[i];
       }
-      info.num_unbounded++;
+      info.num_rays++;
       info.starts_bound.min_bound_ = minVector(info.starts_bound.min_bound_, starts[i]);
       info.starts_bound.max_bound_ = maxVector(info.starts_bound.max_bound_, starts[i]);
       info.rays_bound.min_bound_ = minVector(info.rays_bound.min_bound_, ends[i]);
       info.rays_bound.max_bound_ = maxVector(info.rays_bound.max_bound_, ends[i]);
+      if (times[i] < info.min_time)
+      {
+        info.start_pos = starts[i];
+      }
       info.min_time = std::min(info.min_time, times[i]);
+      if (times[i] > info.max_time)
+      {
+        info.end_pos = starts[i];
+      }
       info.max_time = std::max(info.max_time, times[i]);
     }
     info.rays_bound.min_bound_ = minVector(info.rays_bound.min_bound_, info.starts_bound.min_bound_);
     info.rays_bound.max_bound_ = maxVector(info.rays_bound.max_bound_, info.starts_bound.max_bound_);
-  };  
+  };
   bool success = readPly(file_name, true, find_bounds, 0);
   info.centroid /= static_cast<double>(info.num_bounded);
   return success;
 }
 
 
-double Cloud::estimatePointSpacing(std::string &file_name, const Cuboid &bounds, int num_points)
+double Cloud::estimatePointSpacing(const std::string &file_name, const Cuboid &bounds, int num_points)
 {
   // two-iteration estimation, modelling the point distribution by the below exponent.
   // larger exponents (towards 2.5) match thick forests, lower exponents (towards 2) match smooth terrain and surfaces
-  const double cloud_exponent = 2.0; // model num_points = (cloud_width/voxel_width)^cloud_exponent
+  const double cloud_exponent = 2.0;  // model num_points = (cloud_width/voxel_width)^cloud_exponent
 
   Eigen::Vector3d extent = bounds.max_bound_ - bounds.min_bound_;
-  double cloud_width = pow(extent[0]*extent[1]*extent[2], 1.0/3.0); // an average
-  double voxel_width = cloud_width / pow((double)num_points, 1.0/cloud_exponent);
-  voxel_width *= 5.0; // we want to use a larger width because this process only works when the width is an overestimation
+  double cloud_width = pow(extent[0] * extent[1] * extent[2], 1.0 / 3.0);  // an average
+  double voxel_width = cloud_width / pow((double)num_points, 1.0 / cloud_exponent);
+  voxel_width *=
+    5.0;  // we want to use a larger width because this process only works when the width is an overestimation
   std::cout << "initial voxel width estimate: " << voxel_width << std::endl;
   double num_voxels = 0;
   std::set<Eigen::Vector3i, Vector3iLess> test_set;
 
-  auto estimate_size = [&](std::vector<Eigen::Vector3d> &, std::vector<Eigen::Vector3d> &ends, std::vector<double> &, std::vector<ray::RGBA> &colours)
-  {
+  auto estimate_size = [&](std::vector<Eigen::Vector3d> &, std::vector<Eigen::Vector3d> &ends, std::vector<double> &,
+                           std::vector<ray::RGBA> &colours) {
     for (unsigned int i = 0; i < ends.size(); i++)
     {
       if (colours[i].alpha == 0)
@@ -346,18 +381,17 @@ double Cloud::estimatePointSpacing(std::string &file_name, const Cuboid &bounds,
       const Eigen::Vector3d &point = ends[i];
       Eigen::Vector3i place(int(std::floor(point[0] / voxel_width)), int(std::floor(point[1] / voxel_width)),
                             int(std::floor(point[2] / voxel_width)));
-      if (test_set.find(place) == test_set.end())
+      if (test_set.insert(place).second)
       {
-        test_set.insert(place);
         num_voxels++;
       }
     }
-  };  
+  };
   if (!readPly(file_name, true, estimate_size, 0))
     return 0;
 
   double points_per_voxel = (double)num_points / num_voxels;
-  double width = voxel_width / pow(points_per_voxel, 1.0/cloud_exponent);
+  double width = voxel_width / pow(points_per_voxel, 1.0 / cloud_exponent);
   std::cout << "estimated point spacing: " << width << std::endl;
   return width;
 }
@@ -366,7 +400,7 @@ double Cloud::estimatePointSpacing() const
 {
   // two-iteration estimation, modelling the point distribution by the below exponent.
   // larger exponents (towards 2.5) match thick forests, lower exponents (towards 2) match smooth terrain and surfaces
-  const double cloud_exponent = 2.0; // model num_points = (cloud_width/voxel_width)^cloud_exponent
+  const double cloud_exponent = 2.0;  // model num_points = (cloud_width/voxel_width)^cloud_exponent
 
   Eigen::Vector3d min_bound, max_bound;
   calcBounds(&min_bound, &max_bound, kBFEnd);
@@ -375,9 +409,10 @@ double Cloud::estimatePointSpacing() const
   for (unsigned int i = 0; i < ends.size(); i++)
     if (rayBounded(i))
       num_points++;
-  double cloud_width = pow(extent[0]*extent[1]*extent[2], 1.0/3.0); // an average
-  double voxel_width = cloud_width / pow((double)num_points, 1.0/cloud_exponent);
-  voxel_width *= 5.0; // we want to use a larger width because this process only works when the width is an overestimation
+  double cloud_width = pow(extent[0] * extent[1] * extent[2], 1.0 / 3.0);  // an average
+  double voxel_width = cloud_width / pow((double)num_points, 1.0 / cloud_exponent);
+  voxel_width *=
+    5.0;  // we want to use a larger width because this process only works when the width is an overestimation
   std::cout << "initial voxel width estimate: " << voxel_width << std::endl;
   double num_voxels = 0;
   std::set<Eigen::Vector3i, Vector3iLess> test_set;
@@ -388,15 +423,14 @@ double Cloud::estimatePointSpacing() const
       const Eigen::Vector3d &point = ends[i];
       Eigen::Vector3i place(int(std::floor(point[0] / voxel_width)), int(std::floor(point[1] / voxel_width)),
                             int(std::floor(point[2] / voxel_width)));
-      if (test_set.find(place) == test_set.end())
+      if (test_set.insert(place).second)
       {
-        test_set.insert(place);
         num_voxels++;
       }
     }
   }
   double points_per_voxel = (double)num_points / num_voxels;
-  double width = voxel_width / pow(points_per_voxel, 1.0/cloud_exponent);
+  double width = voxel_width / pow(points_per_voxel, 1.0 / cloud_exponent);
   std::cout << "estimated point spacing: " << width << std::endl;
   return width;
 }
@@ -445,26 +479,26 @@ void Cloud::reserve(size_t size)
 
 Eigen::Array<double, 22, 1> Cloud::getMoments() const
 {
-  Eigen::Vector3d startMean(0,0,0);
-  Eigen::Array3d startSigma(0,0,0);
-  Eigen::Vector3d endMean(0,0,0);
-  Eigen::Array3d endSigma(0,0,0);
+  Eigen::Vector3d startMean(0, 0, 0);
+  Eigen::Array3d startSigma(0, 0, 0);
+  Eigen::Vector3d endMean(0, 0, 0);
+  Eigen::Array3d endSigma(0, 0, 0);
   double timeMean = 0.0;
   double timeSigma = 0.0;
-  Eigen::Vector4d colourMean(0,0,0,0);
-  Eigen::Array4d colourSigma(0,0,0,0);
-  for (size_t i = 0; i<ends.size(); i++)
+  Eigen::Vector4d colourMean(0, 0, 0, 0);
+  Eigen::Array4d colourSigma(0, 0, 0, 0);
+  for (size_t i = 0; i < ends.size(); i++)
   {
     startMean += starts[i];
     endMean += ends[i];
     timeMean += times[i];
     colourMean += Eigen::Vector4d(colours[i].red, colours[i].green, colours[i].blue, colours[i].alpha) / 255.0;
-  }  
+  }
   startMean /= (double)ends.size();
   endMean /= (double)ends.size();
   timeMean /= (double)ends.size();
   colourMean /= (double)ends.size();
-  for (size_t i = 0; i<ends.size(); i++)
+  for (size_t i = 0; i < ends.size(); i++)
   {
     Eigen::Array3d start = (starts[i] - startMean).array();
     startSigma += start * start;
@@ -474,26 +508,26 @@ Eigen::Array<double, 22, 1> Cloud::getMoments() const
     Eigen::Vector4d colour(colours[i].red, colours[i].green, colours[i].blue, colours[i].alpha);
     Eigen::Array4d col = (colour / 255.0 - colourMean).array();
     colourSigma += col * col;
-  }   
+  }
   startSigma = (startSigma / (double)ends.size()).sqrt();
   endSigma = (endSigma / (double)ends.size()).sqrt();
   timeSigma = std::sqrt(timeSigma / (double)ends.size());
-  colourSigma = (colourSigma / (double)ends.size()).sqrt();  
+  colourSigma = (colourSigma / (double)ends.size()).sqrt();
 
   Eigen::Array<double, 22, 1> result;
   result << startMean, startSigma, endMean, endSigma, timeMean, timeSigma, colourMean, colourSigma;
   std::cout << "stats: ";
-  for (int i = 0; i<22; i++)
-    std::cout << ", " << result[i];
+  for (int i = 0; i < 22; i++) std::cout << ", " << result[i];
   std::cout << std::endl;
-  return result; // Note: this is used once per cloud, returning by value is not a performance issue
+  return result;  // Note: this is used once per cloud, returning by value is not a performance issue
 }
 
-bool Cloud::read(const std::string &file_name,  
-     std::function<void(std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends, 
-     std::vector<double> &times, std::vector<RGBA> &colours)> apply)
+bool Cloud::read(const std::string &file_name,
+                 std::function<void(std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends,
+                                    std::vector<double> &times, std::vector<RGBA> &colours)>
+                   apply)
 {
   return readPly(file_name, true, apply, 0);
 }
 
-} // namespace ray
+}  // namespace ray

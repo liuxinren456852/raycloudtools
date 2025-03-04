@@ -14,7 +14,7 @@
 
 #if RAYLIB_WITH_TBB
 #include <tbb/parallel_for.h>
-#endif // RAYLIB_WITH_TBB
+#endif  // RAYLIB_WITH_TBB
 
 namespace ray
 {
@@ -23,7 +23,7 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
 {
   ellipsoids->clear();
   ellipsoids->resize(cloud.rayCount());
-  int search_size = 16;
+  const int search_size = std::min(16, (int)cloud.rayCount() - 1);
   const double max_double = std::numeric_limits<double>::max();
   Eigen::Vector3d ellipsoids_min(max_double, max_double, max_double);
   Eigen::Vector3d ellipsoids_max(-max_double, -max_double, -max_double);
@@ -60,7 +60,7 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
     progress->end();
     progress->begin("generateEllipsoids", cloud.ends.size());
   }
-  const auto generate_ellipsoid = [&](size_t i)  // 
+  const auto generate_ellipsoid = [&](size_t i)  //
   {
     Ellipsoid &ellipsoid = (*ellipsoids)[i];
     ellipsoid.clear();
@@ -82,7 +82,7 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
     scatter.setZero();
     Eigen::Vector3d centroid(0, 0, 0);
     double num_neighbours = 0;
-    for (int j = 0; j < search_size && indices(j, i) > -1; ++j)
+    for (int j = 0; j < search_size && indices(j, i) != Nabo::NNSearchD::InvalidIndex; ++j)
     {
       int index = indices(j, i);
       if (cloud.rayBounded(index))
@@ -96,7 +96,7 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
       return;
     }
     centroid /= num_neighbours;
-    for (int j = 0; j < search_size && indices(j, i) > -1; j++)
+    for (int j = 0; j < search_size && indices(j, i) != Nabo::NNSearchD::InvalidIndex; j++)
     {
       int index = indices(j, i);
       if (cloud.rayBounded(index))
@@ -118,12 +118,11 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
     eigen_value[0] = scale * sqrt(std::max(1e-10, eigen_value[0]));
     eigen_value[1] = scale * sqrt(std::max(1e-10, eigen_value[1]));
     eigen_value[2] = scale * sqrt(std::max(1e-10, eigen_value[2]));
-    ellipsoid.eigen_mat.row(0) = eigen_vector.col(0) / eigen_value[0];
-    ellipsoid.eigen_mat.row(1) = eigen_vector.col(1) / eigen_value[1];
-    ellipsoid.eigen_mat.row(2) = eigen_vector.col(2) / eigen_value[2];
+    ellipsoid.eigen_mat.row(0) = (eigen_vector.col(0) / eigen_value[0]).cast<float>();
+    ellipsoid.eigen_mat.row(1) = (eigen_vector.col(1) / eigen_value[1]).cast<float>();
+    ellipsoid.eigen_mat.row(2) = (eigen_vector.col(2) / eigen_value[2]).cast<float>();
     ellipsoid.time = cloud.times[i];
     ellipsoid.setExtents(eigen_vector, eigen_value);
-    ellipsoid.setPlanarity(eigen_value);
   };
 
 #if RAYLIB_WITH_TBB
@@ -132,8 +131,8 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
   for (size_t i = 0; i < ellipsoids->size(); ++i)
   {
     Ellipsoid &ellipsoid = (*ellipsoids)[i];
-    const auto ellipsoid_min = ellipsoid.pos - ellipsoid.extents;
-    const auto ellipsoid_max = ellipsoid.pos + ellipsoid.extents;
+    const auto ellipsoid_min = ellipsoid.pos - ellipsoid.extents.cast<double>();
+    const auto ellipsoid_max = ellipsoid.pos + ellipsoid.extents.cast<double>();
 
     ellipsoids_min.x() = std::min(ellipsoids_min.x(), ellipsoid_min.x());
     ellipsoids_min.y() = std::min(ellipsoids_min.y(), ellipsoid_min.y());
@@ -142,14 +141,18 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
     ellipsoids_max.y() = std::max(ellipsoids_max.y(), ellipsoid_max.y());
     ellipsoids_max.z() = std::max(ellipsoids_max.z(), ellipsoid_max.z());
   }
-#else  // RAYLIB_WITH_TBB
-  for (size_t i = 0; i < cloud.rayCount(); ++i)
+#else   // RAYLIB_WITH_TBB
+  const size_t count = cloud.rayCount();
+  #pragma omp parallel for schedule(static)
+  for (size_t i = 0; i < count; ++i)
   {
     generate_ellipsoid(i);
-
+  }
+  for (size_t i = 0; i < ellipsoids->size(); ++i)
+  {
     Ellipsoid &ellipsoid = (*ellipsoids)[i];
-    const auto ellipsoid_min = ellipsoid.pos - ellipsoid.extents;
-    const auto ellipsoid_max = ellipsoid.pos + ellipsoid.extents;
+    const auto ellipsoid_min = ellipsoid.pos - ellipsoid.extents.cast<double>();
+    const auto ellipsoid_max = ellipsoid.pos + ellipsoid.extents.cast<double>();
 
     ellipsoids_min.x() = std::min(ellipsoids_min.x(), ellipsoid_min.x());
     ellipsoids_min.y() = std::min(ellipsoids_min.y(), ellipsoid_min.y());
@@ -158,7 +161,7 @@ void generateEllipsoids(std::vector<Ellipsoid> *ellipsoids, Eigen::Vector3d *bou
     ellipsoids_max.y() = std::max(ellipsoids_max.y(), ellipsoid_max.y());
     ellipsoids_max.z() = std::max(ellipsoids_max.z(), ellipsoid_max.z());
   }
-#endif // RAYLIB_WITH_TBB
+#endif  // RAYLIB_WITH_TBB
 
   if (bounds_min)
   {

@@ -7,9 +7,9 @@
 
 #include "raylib/raylibconfig.h"
 
-#include "raygrid.h"
 #include "raycloud.h"
 #include "rayellipsoid.h"
+#include "raygrid.h"
 
 #include <atomic>
 #include <limits>
@@ -29,7 +29,7 @@ enum class RAYLIB_EXPORT MergeType : int
   Newest,
   Mininum,
   Maximum,
-  Order, // in file priority order, first to last
+  Order,  // in file priority order, first to last
   All
 };
 
@@ -76,6 +76,9 @@ public:
   /// Reset previous results. Memory is retained.
   void clear();
 
+  // seed the ray grid, to tell it which voxels it needs to add rays in
+  void seedRayGrid(Grid<unsigned> *grid, const Cloud &cloud);
+
   /// Fill a @p grid with with rays from @p cloud . For each ray we add its index to each grid cell it traces through.
   ///
   /// The grid bounds must be set sufficiently large to hold the rays before calling. The grid resolution is also set
@@ -85,7 +88,7 @@ public:
   /// @param cloud The cloud which grid indices reference rays in.
   /// @param progress Optional progress tracker.
   /// @todo This needs a more global home
-  static void fillRayGrid(Grid<unsigned> *grid, const Cloud &cloud, Progress *progress = nullptr);
+  static void fillRayGrid(Grid<unsigned> *grid, const Cloud &cloud, Progress *progress);
 
 private:
   double voxelSizeForCloud(const Cloud &cloud) const;
@@ -95,8 +98,8 @@ private:
   /// mark the ray (through @c transient_ray_marks) as removed.
   /// @c ellipsoid_cloud_first is used only for the 'order' merge type, to choose which to mark
   void markIntersectedEllipsoids(const Cloud &cloud, const Grid<unsigned> &ray_grid,
-                                 std::vector<Bool> *transient_ray_marks, double num_rays, 
-                                 bool self_transient, Progress *progress, bool ellipsoid_cloud_first = false);
+                                 std::vector<Bool> *transient_ray_marks, double num_rays, bool self_transient,
+                                 Progress *progress, bool ellipsoid_cloud_first = false);
 
   /// Finalise the cloud filter and populate @c transientResults() and @c fixedResults() .
   void finaliseFilter(const Cloud &cloud, const std::vector<Bool> &transient_ray_marks);

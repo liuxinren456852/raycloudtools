@@ -30,20 +30,22 @@ option(RAYCLOUD_BUILD_TESTS "Build unit tests?" OFF)
 option(RAYCLOUD_LEAK_TRACK "Enable memory leak tracking?" OFF)
 
 # WITH_ build options.
-option(WITH_3ES "With 3rd Eye Scene support for debug visualisation? Disables WITH_ROS." OFF)
 option(WITH_LAS "With liblas for las file support?" OFF)
 option(WITH_QHULL "With libqhull support?" OFF)
-if(UNIX)
-  option(WITH_ROS "With ROS rviz support for debug visualisation?" OFF)
-endif(UNIX)
-option(WITH_TBB "With Intel Threading Building Blocks support multi-threadding?" ON)
+option(WITH_TIFF "With libgeotiff support?" OFF)
+option(WITH_TBB "With Intel Threading Building Blocks support multi-threadding?" OFF)
+option(WITH_NORMAL_FIELD "Stores rays in the PLY normal field nx,ny,nz. Else rayx,rayy,rayz" ON)
 
 # Convert WITH_ options to 1/0 so we can use them in configuration headers.
-ras_bool_to_int(WITH_3ES)
 ras_bool_to_int(WITH_LAS)
 ras_bool_to_int(WITH_QHULL)
-ras_bool_to_int(WITH_ROS)
+ras_bool_to_int(WITH_TIFF)
 ras_bool_to_int(WITH_TBB)
+ras_bool_to_int(WITH_NORMAL_FIELD)
+
+# other build-time options
+option(DOUBLE_RAYS "Store ray ends as doubles, so distances can be large" OFF)
+ras_bool_to_int(DOUBLE_RAYS)
 
 # Required packages.
 find_package(Eigen3 REQUIRED)
@@ -55,17 +57,12 @@ set(RAYTOOLS_INCLUDE ${EIGEN3_INCLUDE_DIRS} ${libnabo_INCLUDE_DIRS})
 set(RAYTOOLS_LINK ${libnabo_LIBRARIES} Threads::Threads)
 
 # Optionally configured packages.
-if(WITH_3ES)
-  find_package(3es REQUIRED)
-  list(APPEND RAYTOOLS_LINK 3es::3es-core)
-  # Not compatible with WITH_ROS
-  set(WITH_ROS 0)
-endif(WITH_3ES)
 if(WITH_LAS)
   find_package(libLAS REQUIRED)
   list(APPEND RAYTOOLS_INCLUDE ${libLAS_INCLUDE_DIRS})
   list(APPEND RAYTOOLS_LINK ${libLAS_LIBRARIES})
 endif(WITH_LAS)
+
 if(WITH_QHULL)
   # Find the qhull that provides a config with targets first
   find_package(Qhull CONFIG QUIET)
@@ -77,15 +74,37 @@ if(WITH_QHULL)
   list(APPEND RAYTOOLS_INCLUDE ${QHULL_INCLUDE_DIRS})
   list(APPEND RAYTOOLS_LINK ${QHULL_LIBRARIES})
 endif(WITH_QHULL)
-if(WITH_ROS)
-  find_package(catkin REQUIRED COMPONENTS
-    roscpp
-    message_generation
-    std_msgs
-  )
-  list(APPEND RAYTOOLS_INCLUDE ${catkin_INCLUDE_DIRS})
-  list(APPEND RAYTOOLS_LINK ${catkin_LIBRARIES})
-endif(WITH_ROS)
+
+if (WITH_TIFF)
+    # Find and configure GeoTIFF
+    find_package(GeoTIFF REQUIRED)
+  
+    if(GeoTIFF_FOUND)
+      list(APPEND RAYTOOLS_INCLUDE ${GeoTIFF_INCLUDE_DIR})
+      list(APPEND RAYTOOLS_LINK ${GeoTIFF_LIBRARIES})
+    else()
+      message(FATAL_ERROR "GeoTIFF library not found.")
+    endif()
+
+    # Find and configure TIFF
+    find_package(TIFF REQUIRED)
+    if (TIFF_FOUND)
+        list(APPEND RAYTOOLS_INCLUDE ${TIFF_INCLUDE_DIRS})
+        list(APPEND RAYTOOLS_LINK ${TIFF_LIBRARIES})
+    else()
+        message(FATAL_ERROR "TIFF library not found.")
+    endif()
+
+    # Find and configure PROJ
+    find_package(PROJ REQUIRED)
+    if (PROJ_FOUND)
+        list(APPEND RAYTOOLS_INCLUDE ${PROJ_INCLUDE_DIRS})
+        list(APPEND RAYTOOLS_LINK ${PROJ_LIBRARIES})
+    else()
+        message(FATAL_ERROR "PROJ library not found.")
+    endif()
+endif (WITH_TIFF)
+
 if(WITH_TBB)
 # Helper macro to Find TBB prefering TBBConfig, falling back to FindTBB. TBB_LIBRARIES will be defined in both cases.
 # TBB_INCLUDE_DIRS will be empty for TBBConfig, and populated for FindTBB.

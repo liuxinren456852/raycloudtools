@@ -19,10 +19,11 @@ set(PUBLIC_HEADERS
   raycloudwriter.h
   rayconcavehull.h
   rayconvexhull.h
-  raydebugdraw.h
+  raydecimation.h
   rayellipsoid.h
   rayfinealignment.h
   rayforestgen.h
+  rayforeststructure.h
   raygrid.h
   raylaz.h
   raymerger.h
@@ -39,14 +40,26 @@ set(PUBLIC_HEADERS
   raythreads.h
   raytrajectory.h
   raytreegen.h
+  raytreestructure.h
   rayunused.h
   rayutils.h
   rayparse.h
   rayrandom.h
   rayrenderer.h
+  extraction/raytrunk.h
+  extraction/raytrunks.h
+  extraction/rayclusters.h
+  extraction/rayleaves.h
+  extraction/rayterrain.h 
+  extraction/raytrees.h
+  extraction/rayforest.h
+  extraction/raysegment.h
+  extraction/raytreenode.h
+  extraction/raygrid2d.h
 )
 
 set(PRIVATE_HEADERS
+  imageread.h
   imagewrite.h
 )
 
@@ -59,9 +72,11 @@ set(SOURCES
   raycloudwriter.cpp
   rayconcavehull.cpp
   rayconvexhull.cpp
+  raydecimation.cpp
   rayellipsoid.cpp
   rayfinealignment.cpp
   rayforestgen.cpp
+  rayforeststructure.cpp
   raylaz.cpp
   raymerger.cpp
   raymesh.cpp
@@ -75,24 +90,25 @@ set(SOURCES
   raythreads.cpp
   raytrajectory.cpp
   raytreegen.cpp
+  raytreestructure.cpp
   rayparse.cpp
   rayrandom.cpp
   rayrenderer.cpp
+  extraction/raygrid2d.cpp
+  extraction/raytrunk.cpp
+  extraction/raytrunks.cpp
+  extraction/rayclusters.cpp
+  extraction/rayleaves.cpp
+  extraction/rayterrain.cpp
+  extraction/raytrees.cpp
+  extraction/rayforest.cpp
+  extraction/rayforest_draw.cpp
+  extraction/rayforest_watershed.cpp
+  extraction/raysegment.cpp
 )
 
-# Select the source file to use with raydebudraw.
-if(WITH_3ES)
-  # Using 3rd Eye Scene
-  list(APPEND SOURCES raydebugdraw_3es.cpp)
-elseif(WITH_ROS)
-  # Using ROS/rivz
-  list(APPEND SOURCES raydebugdraw_ros.cpp)
-else(WITH_3ES)
-  # Disabled.
-  list(APPEND SOURCES raydebugdraw_none.cpp)
-endif(WITH_3ES)
-
 get_target_property(SIMPLE_FFT_INCLUDE_DIRS simple_fft INTERFACE_INCLUDE_DIRECTORIES)
+add_compile_options("-fPIC")
 
 if(WITH_QHULL)
 set(QHULL_LIBS

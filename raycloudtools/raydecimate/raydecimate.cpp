@@ -7,79 +7,87 @@
 #include "raylib/raycloudwriter.h"
 #include "raylib/rayparse.h"
 #include "raylib/rayply.h"
+#include "raylib/raydecimation.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <map>
 
 void usage(int exit_code = 1)
 {
+  // clang-format off
   std::cout << "Decimate a ray cloud spatially or temporally" << std::endl;
   std::cout << "usage:" << std::endl;
-  std::cout << "raydecimate raycloud 3 cm   - reduces to one end point every 3 cm" << std::endl;
-  std::cout << "raydecimate raycloud 4 rays - reduces to every fourth ray" << std::endl;
+  std::cout << "raydecimate raycloud 3 cm   - reduces to one end point every 3 cm. A spatially even subsampling" << std::endl;
+  std::cout << "raydecimate raycloud 4 rays - reduces to every fourth ray. A temporally even subsampling (if rays are chronological)" << std::endl;
+  std::cout << "advanced methods not supported in rayrestore:" << std::endl;
+  std::cout << "raydecimate raycloud 20 cm 64 points - A maximum of 64 end points per cubic 20 cm. Retains small-scale details compared to spatial decimation" << std::endl;
+  std::cout << "raydecimate raycloud 20 cm/ray - If all cells overlapping the ray intersect a ray then ray not added. Maintains distribution of rays for e.g. raycombine" << std::endl;
+  std::cout << "raydecimate raycloud 3 cm/m - reduces to ray ends spaced 3 cm apart for each metre of their length. Good for maintaining a range of point densities" << std::endl;
+  // clang-format off
   exit(exit_code);
 }
 
+class Vector4iLess
+{
+public:
+  bool operator()(const Eigen::Vector4i &a, const Eigen::Vector4i &b) const
+  {
+    if (a[3] != b[3])
+      return a[3] < b[3];
+    if (a[0] != b[0])
+      return a[0] < b[0];
+    if (a[1] != b[1])
+      return a[1] < b[1];
+    return a[2] < b[2];
+  }
+};
+
 // Decimates the ray cloud, spatially or in time
-int main(int argc, char *argv[])
+int rayDecimate(int argc, char *argv[])
 {
   ray::FileArgument cloud_file;
-  ray::IntArgument num_rays(1,100);
+  ray::IntArgument num_rays(1, 10000);
+  ray::IntArgument width_for_ray(1, 10000);
   ray::DoubleArgument vox_width(0.01, 100.0);
-  ray::ValueKeyChoice quantity({&vox_width, &num_rays}, {"cm", "rays"});
-  if (!ray::parseCommandLine(argc, argv, {&cloud_file, &quantity}))
+  ray::DoubleArgument radius_per_length(0.01, 100.0);
+  ray::ValueKeyChoice quantity({ &vox_width, &num_rays, &radius_per_length, &width_for_ray }, { "cm", "rays", "cm/m", "cm/ray" });
+  ray::TextArgument cm("cm"), points("points"); 
+  bool standard_format = ray::parseCommandLine(argc, argv, { &cloud_file, &quantity });
+  bool double_format_points = ray::parseCommandLine(argc, argv, { &cloud_file, &vox_width, &cm, &num_rays, &points });
+  if (!standard_format && !double_format_points)
     usage();
-  const bool spatial_decimation = quantity.selectedKey() == "cm";
 
-  ray::CloudWriter writer;
-  if (!writer.begin(cloud_file.nameStub() + "_decimated.ply"))
-    usage();
-
-  // By maintaining these buffers below, we avoid almost all memory fragmentation  
-  ray::Cloud chunk;
-  std::vector<int64_t> subsample;
-  // voxel set is global, however its size is proportional to the decimated cloud size,
-  // so we expect it to fit within RAM limits
-  std::set<Eigen::Vector3i, ray::Vector3iLess> voxel_set;  
-
-  auto decimate = [&](std::vector<Eigen::Vector3d> &starts, std::vector<Eigen::Vector3d> &ends, std::vector<double> &times, std::vector<ray::RGBA> &colours)
+  bool res = false;
+  if (double_format_points)
   {
-    if (spatial_decimation)
-    {
-      double width = 0.01 * vox_width.value();
-      subsample.clear();
-      voxelSubsample(ends, width, subsample, voxel_set);
-      chunk.resize(subsample.size());
-      for (int64_t i = 0; i < (int64_t)subsample.size(); i++)
-      {
-        int64_t id = subsample[i];
-        chunk.starts[i] = starts[id];
-        chunk.ends[i] = ends[id];
-        chunk.colours[i] = colours[id];
-        chunk.times[i] = times[id];
-      }
-    }
-    else
-    {
-      size_t decimation = (size_t)num_rays.value();
-      size_t count = (ends.size() + decimation - 1) / decimation;
-      chunk.resize(count);
-      for (size_t i = 0, c = 0; i < ends.size(); i += decimation, c++)
-      {
-        chunk.starts[c] = starts[i];
-        chunk.ends[c] = ends[i];
-        chunk.times[c] = times[i];
-        chunk.colours[c] = colours[i];
-      }
-    }
-    writer.writeChunk(chunk);
-  };
-
-  if (!ray::Cloud::read(cloud_file.name(), decimate))
+    res = ray::decimateSpatioTemporal(cloud_file.nameStub(), vox_width.value(), num_rays.value());
+  }
+  else if (quantity.selectedKey() == "cm/ray")
+  {
+    res = ray::decimateRaysSpatial(cloud_file.nameStub(), width_for_ray.value());
+  }
+  else if (quantity.selectedKey() == "cm")
+  {
+    res = ray::decimateSpatial(cloud_file.nameStub(), vox_width.value());
+  }
+  else if (quantity.selectedKey() == "rays")
+  {
+    res = ray::decimateTemporal(cloud_file.nameStub(), num_rays.value());
+  }
+  else if (quantity.selectedKey() == "cm/m")
+  {
+    res = ray::decimateAngular(cloud_file.nameStub(), radius_per_length.value());
+  }
+  if (!res)
     usage();
-  writer.end();
 
   return 0;
+}
+
+int main(int argc, char *argv[])
+{
+  return ray::runWithMemoryCheck(rayDecimate, argc, argv);
 }
